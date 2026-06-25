@@ -1,187 +1,240 @@
-import React, { useState, useEffect } from "react";
-import AppLayout from "../../../Layouts/AppLayout"; 
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Hotel, Eye, EyeOff, User, Mail, Phone, Home, Lock } from 'lucide-react'
 
-import { UserCheck, Clock, CheckCircle2, XCircle, Mail, Phone, Users, Home } from "lucide-react";
-import { db } from "../../../firebase"; 
-import { collection, getDocs, doc, updateDoc, query, orderBy, setDoc, getDoc } from 'firebase/firestore';
+import { auth, db } from "../../../firebase"; 
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
 
-export default function RegistrationRequests() {
-    const [requests, setRequests] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, declined: 0 });
 
-    // Fetch registration requests from Firebase and calculate stats
-    const fetchRequests = async () => {
-        try {
-            const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
-            const querySnapshot = await getDocs(q);
-            const requestList = [];
-            let total = 0, pending = 0, approved = 0, declined = 0;
+export default function Register() {
+  const navigate = useNavigate();
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    guardian_phone: '',
+    room_type: '',
+    password: '',
+    password_confirmation: '',
+  })
 
-            querySnapshot.forEach((doc) => {
-                const data = doc.data();
-                
-                // only include non-admin users in the request list and stats
-                if (data.role !== 'admin') {
-                    requestList.push({ id: doc.id, ...data });
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value })
+  }
 
-                    total++;
-                    const currentStatus = data.status ? data.status.toLowerCase() : '';
-                    if (currentStatus === 'pending') pending++;
-                    if (currentStatus === 'approved') approved++;
-                    if (currentStatus === 'declined') declined++;
-                }
-            });
+    const submit = async (e) => {
+    e.preventDefault();
 
-            setRequests(requestList);
-            setStats({ total, pending, approved, declined });
-            setLoading(false);
-        } catch (error) {
-            console.error("Error fetching requests: ", error);
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchRequests();
-    }, []);
-
-    // Real-time status update handler with confirmation and automation for room assignment
-    const handleStatusUpdate = async (id, newStatus) => {
-        const confirmAction = window.confirm(`Are you sure you want to ${newStatus.toLowerCase()} this registration request?`);
-        if (!confirmAction) return;
-
-        try {
-            const requestRef = doc(db, "users", id);
-            
-            // Update the user's status in Firebase
-            await updateDoc(requestRef, { 
-                status: newStatus.toLowerCase() 
-            });
-
-            // If admin approves the request, automatically assign the student to their requested room
-            if (newStatus.toLowerCase() === 'approved') {
-                const selectedStudent = requests.find(req => req.id === id);
-                
-                if (selectedStudent && selectedStudent.room_type) {
-                    // Check if the room document already exists in Firebase
-                    const roomDocRef = doc(db, "rooms", selectedStudent.room_type);
-                    const roomDocSnap = await getDoc(roomDocRef);
-
-                    const studentName = selectedStudent.name || 'Unknown Student';
-                    const studentId = selectedStudent.uid ? selectedStudent.uid.substring(0, 7) : id.substring(0, 7);
-                    const currentDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-                    if (roomDocSnap.exists()) {
-                        // If the room document already exists in Firebase, update its status and student info
-                        await updateDoc(roomDocRef, {
-                            status: 'Occupied',
-                            student: studentName,
-                            studentId: studentId,
-                            joinDate: currentDate
-                        });
-                    } else {
-                        // If no document exists for the room in Firebase, create a new one
-                        await setDoc(roomDocRef, {
-                            roomNo: selectedStudent.room_type,
-                            floor: `Floor ${selectedStudent.room_type.charAt(0)}`,
-                            status: 'Occupied',
-                            student: studentName,
-                            studentId: studentId,
-                            joinDate: currentDate,
-                            rent: 5000
-                        });
-                    }
-                }
-            }
-            
-            alert(`Student request successfully ${newStatus.toLowerCase()} and room assigned automatically! 🎉`);
-            fetchRequests(); // Screen refresh to show updated status and stats
-        } catch (error) {
-            console.error("Automation Error: ", error);
-            alert("Status updated, but room sync ran into an issue. Please try again.");
-            fetchRequests();
-        }
-    };
-
-    if (loading) {
-        return (
-            <AppLayout title="Registration Requests">
-                <div className="flex justify-center items-center h-64 text-gray-500 font-bold">
-                    Loading requests from Firebase...
-                </div>
-            </AppLayout>
-        );
+    
+    if (formData.password !== formData.password_confirmation) {
+      alert('Passwords do not match!');
+      return;
     }
 
-    const pendingRequests = requests.filter(req => req.status?.toLowerCase() === 'pending');
+    setLoading(true);
+    try {
+    
+      const userCredential = await createUserWithEmailAndPassword(
+        auth, 
+        formData.email, 
+        formData.password
+      );
+      const user = userCredential.user;
 
-    return (
-        <AppLayout title="Registration Requests">
-            {/* Header */}
-            <div className="mb-8">
-                <h1 className="text-3xl font-black text-gray-800 tracking-tight">Registration Requests</h1>
-                <p className="text-sm text-gray-500 mt-1">Review and manage student registration applications</p>
+      
+      await setDoc(doc(db, "users", user.uid), {
+        uid: user.uid,
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        guardian_phone: formData.guardian_phone,
+        room_type: formData.room_type,
+        status: "pending", 
+        createdAt: new Date()
+      });
+
+      alert("Registration successful! Please wait for admin approval.");
+      navigate('/login?role=student');
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  return (
+    <div
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
+      style={{ background: 'linear-gradient(135deg, #1a2744 0%, #0f1a36 50%, #1a2744 100%)' }}
+    >
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+        <div className="bg-[#1a2744] px-8 pt-8 pb-6 text-center">
+          <div className="w-14 h-14 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center mx-auto mb-4">
+            <Hotel size={28} className="text-white" />
+          </div>
+          <h1 className="text-xl font-bold text-white">Harmony House</h1>
+          <p className="text-white/60 text-sm mt-1">New Student Registration</p>
+        </div>
+
+        <form onSubmit={submit} className="px-8 pt-6 pb-7 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
+            <div className="relative">
+              <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
+                onChange={handleChange}
+                placeholder="Enter your full name"
+                className="w-full pl-10 pr-3.5 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1a2744]/30 focus:border-[#1a2744] transition"
+                required
+              />
             </div>
+          </div>
 
-            {/* Status Cards Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-                {[
-                    { label: 'Total Requests', value: stats.total, icon: UserCheck, color: 'text-gray-600', bgColor: 'bg-gray-100', border: 'border-gray-100' },
-                    { label: 'Pending', value: stats.pending, icon: Clock, color: 'text-orange-500', bgColor: 'bg-orange-50', border: 'border-slate-800' },
-                    { label: 'Approved', value: stats.approved, icon: CheckCircle2, color: 'text-green-500', bgColor: 'bg-green-50', border: 'border-gray-100' },
-                    { label: 'Declined', value: stats.declined, icon: XCircle, color: 'text-red-500', bgColor: 'bg-red-50', border: 'border-gray-100' },
-                ].map((stat, index) => (
-                    <div key={index} className={`bg-white p-6 rounded-2xl border-2 ${stat.border} shadow-sm flex justify-between items-center`}>
-                        <div>
-                            <p className="text-xs font-semibold text-gray-400">{stat.label}</p>
-                            <h3 className={`text-3xl font-black mt-2 ${stat.color === 'text-gray-600' ? 'text-gray-800' : stat.color}`}>{stat.value}</h3>
-                        </div>
-                        <div className={`p-3 ${stat.bgColor} ${stat.color} rounded-2xl`}><stat.icon size={22} /></div>
-                    </div>
-                ))}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address</label>
+            <div className="relative">
+              <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="your.email@example.com"
+                className="w-full pl-10 pr-3.5 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1a2744]/30 focus:border-[#1a2744] transition"
+                required
+              />
             </div>
+          </div>
 
-            <div className="mb-6"><h2 className="text-lg font-bold text-gray-800">Pending Registrations</h2></div>
-
-            {/* Request List */}
-            <div className="space-y-4 max-w-5xl">
-                {pendingRequests.length === 0 ? (
-                    <div className="bg-white p-8 rounded-3xl border border-gray-100 text-center text-gray-400 text-sm italic shadow-sm">
-                        No pending registration requests found at the moment.
-                    </div>
-                ) : (
-                    pendingRequests.map((item) => (
-                        <div key={item.id} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm relative group hover:border-gray-200 transition-all">
-                            <span className="absolute top-6 right-6 px-3 py-1 bg-orange-50 text-orange-500 text-xs font-bold rounded-full capitalize">{item.status}</span>
-                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-14 h-14 rounded-full bg-[#1e293b] flex items-center justify-center text-white font-black text-lg shadow-inner uppercase">
-                                        {item.name?.charAt(0) || 'S'}
-                                    </div>
-                                    <div className="leading-tight">
-                                        <h3 className="text-lg font-black text-gray-800">{item.name || 'Anonymous'}</h3>
-                                        <p className="text-xs text-gray-400 mt-1">UID: {item.uid ? item.uid.substring(0, 8) : item.id.substring(0, 8)}...</p>
-                                    </div>
-                                </div>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3 flex-1 lg:max-w-2xl ml-2">
-                                    <div className="flex items-center gap-2 text-xs text-gray-500 font-medium"><Mail size={14} className="text-gray-400" /><span>{item.email || 'N/A'}</span></div>
-                                    <div className="flex items-center gap-2 text-xs text-gray-500 font-medium"><Phone size={14} className="text-gray-400" /><span>{item.phone || 'N/A'}</span></div>
-                                    <div className="flex items-center gap-2 text-xs text-gray-500 font-medium"><Users size={14} className="text-gray-400" /><span>Guardian: {item.guardian_phone || 'N/A'}</span></div>
-                                    <div className="flex items-center gap-2 text-xs text-gray-500 font-medium"><Home size={14} className="text-gray-400" /><span>Room: {item.room_type || 'N/A'}</span></div>
-                                </div>
-
-                                {/* Fixed Container and Buttons */}
-                                <div className="flex gap-4 mt-4 lg:mt-0">
-                                    <button onClick={() => handleStatusUpdate(item.id, 'Approved')} className="px-4 py-2 bg-green-500 text-white text-sm font-bold rounded-lg hover:bg-green-600 transition">Approve</button>
-                                    <button onClick={() => handleStatusUpdate(item.id, 'Declined')} className="px-4 py-2 bg-red-500 text-white text-sm font-bold rounded-lg hover:bg-red-600 transition">Decline</button>
-                                </div>
-                            </div>
-                        </div>
-                    ))
-                )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone Number</label>
+              <div className="relative">
+                <Phone size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="tel"
+                  name="phone"
+                  value={formData.phone}
+                  onChange={handleChange}
+                  placeholder="01712345678"
+                  className="w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1a2744]/30 focus:border-[#1a2744] transition"
+                  required
+                />
+              </div>
             </div>
-        </AppLayout>
-    );
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Guardian Phone</label>
+              <div className="relative">
+                <Phone size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="tel"
+                  name="guardian_phone"
+                  value={formData.guardian_phone}
+                  onChange={handleChange}
+                  placeholder="01787654321"
+                  className="w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1a2744]/30 focus:border-[#1a2744] transition"
+                  required
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Room Preference</label>
+            <div className="relative">
+              <Home size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <select
+                name="room_type"
+                value={formData.room_type}
+                onChange={handleChange}
+                className="w-full pl-10 pr-3.5 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1a2744]/30 focus:border-[#1a2744] transition appearance-none bg-white"
+              >
+                <option value="">Select room type</option>
+                <option value="A1">Room A1</option>
+                <option value="A2">Room A2</option>
+                <option value="A3">Room A3</option>
+                <option value="B1">Room B1</option>
+                <option value="B2">Room B2</option>
+                <option value="B3">Room B3</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+              <div className="relative">
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="Create password"
+                  className="w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1a2744]/30 focus:border-[#1a2744] transition"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm Password</label>
+              <div className="relative">
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type={showConfirm ? 'text' : 'password'}
+                  name="password_confirmation"
+                  value={formData.password_confirmation}
+                  onChange={handleChange}
+                  placeholder="Re-enter password"
+                  className="w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1a2744]/30 focus:border-[#1a2744] transition"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(!showConfirm)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-xs text-gray-600 leading-relaxed">
+            <span className="font-semibold text-[#1a2744]">Note:</span> Your registration will be reviewed by the admin team. You will receive a confirmation email once your account is approved.
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-[#1a2744] text-white font-semibold text-sm py-2.5 rounded-lg hover:bg-[#162057] transition-colors mt-1 disabled:opacity-50"
+          >
+            {loading ? 'Registering...' : 'Register'}
+          </button>
+        </form>
+
+        <p className="text-center text-sm text-gray-500 pb-6">
+          Already have an account?{' '}
+          <Link to="/login?role=student" className="font-semibold text-[#1a2744] hover:underline">
+            Sign In
+          </Link>
+        </p>
+      </div>
+    </div>
+  )
 }

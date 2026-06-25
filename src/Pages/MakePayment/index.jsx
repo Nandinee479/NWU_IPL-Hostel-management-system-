@@ -26,7 +26,7 @@ async function computePaymentsData(uid) {
         if (userSnap.exists()) {
             const d = userSnap.data();
             if (d.createdAt) {
-                const s = new Date(d.createdAt);
+                const s = d.createdAt.toDate ? d.createdAt.toDate() : new Date(d.createdAt);
                 if (!isNaN(s.getTime())) {
                     const n = new Date();
                     months = Math.max(1, (n.getFullYear() - s.getFullYear()) * 12 + (n.getMonth() - s.getMonth()) + 1);

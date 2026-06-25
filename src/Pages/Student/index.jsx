@@ -11,7 +11,7 @@ const FIXED_MONTHLY_BILL = 5000;
 
 function getMonthsSince(d) {
     if (!d) return 1;
-    const s = new Date(d);
+    const s = d.toDate ? d.toDate() : new Date(d);
     if (isNaN(s.getTime())) return 1;
     const n = new Date();
     const m = (n.getFullYear() - s.getFullYear()) * 12 + (n.getMonth() - s.getMonth());
